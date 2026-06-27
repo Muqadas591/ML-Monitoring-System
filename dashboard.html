@@ -1,0 +1,45 @@
+document.getElementById("uploadForm").onsubmit = async function(e) {
+    e.preventDefault();
+
+    let formData = new FormData(this);
+    let imageInput = document.getElementById("imageInput");
+    let resultDiv = document.getElementById("result");
+    let previewContainer = document.getElementById("imagePreviewContainer");
+    let originalImg = document.getElementById("originalImg");
+    let annotatedImg = document.getElementById("annotatedImg");
+
+    if (imageInput.files && imageInput.files[0]) {
+        originalImg.src = URL.createObjectURL(imageInput.files[0]);
+    }
+
+    resultDiv.innerHTML = "<span style='color: var(--accent); font-weight: 600;'>Neural Network Analyzing...</span>";
+    previewContainer.style.display = "none";
+
+    try {
+        let res = await fetch('/predict', {
+            method: 'POST',
+            body: formData
+        });
+
+        let data = await res.json();
+
+        let message = `Prediction: <strong style="color: var(--text-main); font-size: 1.2rem;">${data.prediction.toUpperCase()}</strong> &nbsp;|&nbsp; Confidence: <strong style="color: var(--text-main); font-size: 1.2rem;">${(data.confidence * 100).toFixed(2)}%</strong>`;
+
+        if (data.retrain_candidate) {
+            message += `<br><span style="color: var(--warning); font-size: 0.9em; margin-top: 10px; display: inline-block; padding: 4px 8px; background: rgba(245, 158, 11, 0.1); border-radius: 4px;">Flagged for Retraining: ${data.retrain_reasons.join(", ")}</span>`;
+        }
+
+        resultDiv.innerHTML = message;
+
+        if (data.annotated_image_url) {
+            annotatedImg.src = data.annotated_image_url + "?t=" + new Date().getTime(); // bypass cache
+            previewContainer.style.display = "flex";
+        } else {
+            // Should not happen, but fallback
+            annotatedImg.src = originalImg.src;
+            previewContainer.style.display = "flex";
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<span style="color: var(--danger);">Error analyzing image. Server might be down.</span>`;
+    }
+};

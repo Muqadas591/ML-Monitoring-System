@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS predictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_path TEXT,
+    prediction TEXT,
+    actual TEXT,
+    confidence REAL,
+    is_correct INTEGER,
+    is_outlier INTEGER DEFAULT 0,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,0 +1,15 @@
+from database.db import fetch_metrics
+
+def generate_report():
+    metrics = fetch_metrics()
+
+    report = f"""
+    ===== ML MODEL REPORT =====
+    Total Predictions: {metrics['total']}
+    Correct: {metrics['correct']}
+    Wrong: {metrics['wrong']}
+    Accuracy: {metrics['accuracy']}%
+    ===========================
+    """
+
+    return report

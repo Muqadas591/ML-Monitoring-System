@@ -1,0 +1,152 @@
+import csv
+import shutil
+from datetime import datetime
+from pathlib import Path
+from database.db import get_db_connection
+
+RETRAIN_DATA_DIR = Path("retrain_data/candidates")
+RETRAIN_METADATA_FILE = Path("retrain_data/retrain_candidates.csv")
+LOW_CONFIDENCE_THRESHOLD = 0.60
+UNCERTAIN_LABELS = {"no_detection", "unknown"}
+
+
+def should_mark_for_retrain(prediction, confidence, is_correct):
+    reasons = []
+
+    # Wrong predictions with ground-truth labels are strongest retraining signals.
+    if is_correct == 0:
+        reasons.append("wrong_prediction")
+
+    # Low confidence predictions are uncertain and useful for future labeling.
+    if confidence < LOW_CONFIDENCE_THRESHOLD:
+        reasons.append("low_confidence")
+
+    # No detection / unknown outputs are useful hard cases.
+    if prediction in UNCERTAIN_LABELS:
+        reasons.append("uncertain_prediction")
+
+    return reasons
+
+
+def _ensure_storage():
+    RETRAIN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    RETRAIN_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _append_metadata_row(row):
+    write_header = not RETRAIN_METADATA_FILE.exists()
+    with RETRAIN_METADATA_FILE.open("a", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=[
+                "captured_at_utc",
+                "source_image_path",
+                "stored_image_path",
+                "prediction",
+                "actual",
+                "confidence",
+                "is_correct",
+                "reasons",
+            ],
+        )
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def store_retrain_candidate(image_path, prediction, actual, confidence, is_correct, reasons):
+    _ensure_storage()
+
+    source = Path(image_path)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    safe_name = f"{stamp}_{source.name}"
+    target = RETRAIN_DATA_DIR / safe_name
+    shutil.copy2(source, target)
+
+    metadata_row = {
+        "captured_at_utc": datetime.utcnow().isoformat(timespec="seconds"),
+        "source_image_path": str(source),
+        "stored_image_path": str(target),
+        "prediction": prediction,
+        "actual": actual or "",
+        "confidence": round(float(confidence), 6),
+        "is_correct": "" if is_correct is None else is_correct,
+        "reasons": ",".join(reasons),
+    }
+    _append_metadata_row(metadata_row)
+
+    return str(target)
+
+
+def list_retrain_candidates():
+    _ensure_storage()
+    if not RETRAIN_METADATA_FILE.exists():
+        return []
+
+    records = []
+    with RETRAIN_METADATA_FILE.open("r", newline="", encoding="utf-8") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            stored_path = row.get("stored_image_path", "")
+            candidate_filename = Path(stored_path).name if stored_path else ""
+
+            row["candidate_filename"] = candidate_filename
+            row["exists"] = Path(stored_path).exists() if stored_path else False
+            row["reasons"] = row.get("reasons", "")
+            records.append(row)
+
+    # Newest first for dashboard usability.
+    return list(reversed(records))
+
+
+def sync_candidates_from_db():
+    _ensure_storage()
+    existing_records = list_retrain_candidates()
+    existing_sources = {row.get("source_image_path", "") for row in existing_records}
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, image_path, prediction, actual, confidence, is_correct
+        FROM predictions
+        ORDER BY id ASC
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    added_count = 0
+    for row in rows:
+        image_path = row["image_path"]
+        prediction = row["prediction"]
+        actual = row["actual"]
+        confidence = row["confidence"]
+        is_correct = row["is_correct"]
+
+        if not image_path:
+            continue
+
+        source = Path(image_path)
+        if not source.exists():
+            continue
+
+        if image_path in existing_sources:
+            continue
+
+        reasons = should_mark_for_retrain(prediction, confidence, is_correct)
+        if not reasons:
+            continue
+
+        store_retrain_candidate(
+            image_path=image_path,
+            prediction=prediction,
+            actual=actual,
+            confidence=confidence,
+            is_correct=is_correct,
+            reasons=reasons,
+        )
+        existing_sources.add(image_path)
+        added_count += 1
+
+    return added_count

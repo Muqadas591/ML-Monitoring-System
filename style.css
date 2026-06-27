@@ -1,0 +1,61 @@
+import random
+import time
+import sys
+import os
+
+# Ensure sdk module is in path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sdk.ml_monitor import MLMonitorClient
+
+def run_simulation():
+    client = MLMonitorClient(api_key="default-api-key", host="http://127.0.0.1:5000", verify_ssl=False)
+
+    classes = ["fraud", "safe"]
+
+    print("Injecting 100 telemetry logs into the remote Observability Platform...")
+    success_count = 0
+    
+    for i in range(100):
+        # Ground truth
+        is_fraud = random.random() < 0.15
+        
+        # Simulate a Data/Feature Drift scenario in the last 25 records
+        if i > 75:
+            is_fraud = random.random() < 0.5  # Concept drift
+            features = {"tx_amount": random.uniform(1000, 5000), "user_age": random.randint(18, 25)}
+        else:
+            features = {"tx_amount": random.uniform(10, 400), "user_age": random.randint(25, 65)}
+
+        actual = "fraud" if is_fraud else "safe"
+        
+        # Model predictions (85% accurate base)
+        if random.random() < 0.85:
+            prediction = actual
+            confidence = random.uniform(0.7, 0.99)
+        else:
+            prediction = "fraud" if actual == "safe" else "safe"
+            confidence = random.uniform(0.2, 0.7)
+
+        # Execution time
+        latency = random.uniform(50, 150)
+        if i > 80: latency += 300 # Simulate server degradation
+        
+        # Beam telemetry to API
+        res = client.log_prediction(
+            prediction=prediction, 
+            actual=actual, 
+            confidence=confidence, 
+            features=features, 
+            execution_time_ms=latency
+        )
+        
+        if res and res.get("status") == "success":
+            success_count += 1
+            
+        time.sleep(0.01)
+
+    print(f"Simulation complete. Successfully ingested {success_count}/100 logs.")
+
+if __name__ == "__main__":
+    run_simulation()

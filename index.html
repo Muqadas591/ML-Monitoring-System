@@ -1,0 +1,61 @@
+async function loadRetrainCandidates() {
+    const body = document.getElementById('candidatesBody');
+    const countEl = document.getElementById('candidateCount');
+    const syncInfo = document.getElementById('syncInfo');
+    if (!body || !countEl) return;
+
+    try {
+        const response = await fetch('/api/retrain-candidates');
+        if (!response.ok) {
+            throw new Error('Failed to load retrain candidates');
+        }
+
+        const data = await response.json();
+        const records = data.records || [];
+        countEl.textContent = data.count || 0;
+        if (syncInfo) {
+            const synced = data.synced_from_existing_predictions || 0;
+            if (synced > 0) {
+                syncInfo.textContent = `${synced} older predictions were auto-added from database history.`;
+            } else {
+                syncInfo.textContent = 'Database history is already synced.';
+            }
+        }
+
+        body.innerHTML = '';
+        if (!records.length) {
+            const row = document.createElement('tr');
+            row.innerHTML = '<td colspan="6">No retrain candidates yet.</td>';
+            body.appendChild(row);
+            return;
+        }
+
+        records.forEach((item) => {
+            const row = document.createElement('tr');
+            const actualText = item.actual && item.actual.length ? item.actual : '-';
+            const conf = Number(item.confidence);
+            const confidenceText = Number.isFinite(conf) ? conf.toFixed(4) : item.confidence;
+            const reasons = item.reasons || '-';
+
+            let downloadCell = 'Missing file';
+            if (item.exists && item.candidate_filename) {
+                const href = `/retrain-candidates/download/${encodeURIComponent(item.candidate_filename)}`;
+                downloadCell = `<a href="${href}">Download</a>`;
+            }
+
+            row.innerHTML = `
+                <td>${item.captured_at_utc || '-'}</td>
+                <td>${item.prediction || '-'}</td>
+                <td>${actualText}</td>
+                <td>${confidenceText}</td>
+                <td>${reasons}</td>
+                <td>${downloadCell}</td>
+            `;
+            body.appendChild(row);
+        });
+    } catch (err) {
+        body.innerHTML = '<tr><td colspan="6">Failed to load retrain candidates.</td></tr>';
+    }
+}
+
+loadRetrainCandidates();

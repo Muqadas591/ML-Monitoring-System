@@ -1,0 +1,348 @@
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
+
+function renderPieChart(correct, wrong) {
+    const chartEl = document.getElementById('myChart');
+    if (!chartEl) return;
+
+    const ctx = chartEl.getContext('2d');
+
+    new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: ['Correct', 'Wrong'],
+            datasets: [{
+                data: [correct, wrong],
+                backgroundColor: ['#10b981', '#ef4444'],
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.1)'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: '#f8fafc' }
+                }
+            }
+        }
+    });
+}
+
+function renderAccuracyTrendChart(points) {
+    const chartEl = document.getElementById('accuracyTrendChart');
+    if (!chartEl) return;
+
+    if (!points || !points.length) {
+        const trendInfo = document.getElementById('trendInfo');
+        if (trendInfo) {
+            trendInfo.textContent = 'No prediction history available yet.';
+        }
+        return;
+    }
+
+    const labels = points.map((item) => item.label || `#${item.id}`);
+    const values = points.map((item) => item.accuracy);
+    const latest = points[points.length - 1];
+    const trendInfo = document.getElementById('trendInfo');
+    if (trendInfo) {
+        trendInfo.textContent = `Latest running accuracy: ${latest.accuracy}% (correct ${latest.correct}/${latest.total}, labeled ${latest.labeled})`;
+    }
+
+    const ctx = chartEl.getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Accuracy %',
+                data: values,
+                borderColor: '#60a5fa',
+                backgroundColor: 'rgba(96, 165, 250, 0.15)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Prediction Sequence',
+                        color: '#94a3b8'
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    max: 100
+                }
+            }
+        }
+    });
+}
+
+function applyHeatmapClass(cell, value) {
+    cell.classList.remove('cell-high', 'cell-mid', 'cell-low');
+    if (value >= 20) {
+        cell.classList.add('cell-high');
+    } else if (value >= 5) {
+        cell.classList.add('cell-mid');
+    } else {
+        cell.classList.add('cell-low');
+    }
+}
+
+function renderConfusionMatrix(data) {
+    const matrix = data.matrix || [[0, 0], [0, 0]];
+    const tp = matrix[0]?.[0] ?? 0;
+    const fn = matrix[0]?.[1] ?? 0;
+    const fp = matrix[1]?.[0] ?? 0;
+    const tn = matrix[1]?.[1] ?? 0;
+
+    const tpCell = document.getElementById('cm-tp');
+    const fnCell = document.getElementById('cm-fn');
+    const fpCell = document.getElementById('cm-fp');
+    const tnCell = document.getElementById('cm-tn');
+
+    if (!tpCell || !fnCell || !fpCell || !tnCell) return;
+
+    tpCell.textContent = tp;
+    fnCell.textContent = fn;
+    fpCell.textContent = fp;
+    tnCell.textContent = tn;
+
+    applyHeatmapClass(tpCell, tp);
+    applyHeatmapClass(fnCell, fn);
+    applyHeatmapClass(fpCell, fp);
+    applyHeatmapClass(tnCell, tn);
+}
+
+function renderDriftStatus(data) {
+    const driftMessage = document.getElementById('driftMessage');
+    if (!driftMessage) return;
+
+    if (data.old_mean === null || data.new_mean === null) {
+        driftMessage.textContent = data.message || 'Not enough data to calculate drift.';
+        driftMessage.style.color = 'var(--text-muted)';
+        return;
+    }
+
+    if (data.drift) {
+        driftMessage.innerHTML = `<span style="color: var(--danger); font-weight: 600;">Drift Shift Detected!</span><br>Old Mean: ${data.old_mean} &rarr; New Mean: ${data.new_mean}<br>Score: ${data.difference_score} (Threshold: ${data.threshold})`;
+    } else {
+        driftMessage.innerHTML = `<span style="color: var(--success); font-weight: 600;">Distribution Stable</span><br>Old Mean: ${data.old_mean} &rarr; New Mean: ${data.new_mean}<br>Score: ${data.difference_score} (Threshold: ${data.threshold})`;
+    }
+}
+
+function renderConceptDrift(data) {
+    const alertBox = document.getElementById('conceptDriftAlert');
+    const alertMsg = document.getElementById('conceptDriftMsg');
+    
+    if (!alertBox || !alertMsg) return;
+    
+    if (data.drift_detected) {
+        alertBox.style.display = 'block';
+        alertMsg.innerHTML = `${data.message}<br>Overall Accuracy: <strong>${data.overall_accuracy}%</strong> | Recent Accuracy: <strong>${data.recent_accuracy}%</strong>`;
+    } else {
+        alertBox.style.display = 'none';
+    }
+}
+
+function renderOutliers(data) {
+    const countEl = document.getElementById('outlierCount');
+    const body = document.getElementById('outliersBody');
+    const outlierInfo = document.getElementById('outlierInfo');
+    if (!countEl || !body) return;
+
+    countEl.textContent = data.count || 0;
+    if (outlierInfo) {
+        outlierInfo.textContent = `Rule: confidence < ${data.low_threshold} or > ${data.high_threshold}`;
+    }
+
+    body.innerHTML = '';
+    const records = data.records || [];
+
+    if (!records.length) {
+        const row = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.textContent = 'No outliers found for the configured thresholds.';
+        row.appendChild(td);
+        body.appendChild(row);
+        return;
+    }
+
+    records.slice(0, 20).forEach((item) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.id}</td>
+            <td style="color: var(--accent-hover);">${item.prediction || '-'}</td>
+            <td>${item.actual || '-'}</td>
+            <td>${Number(item.confidence).toFixed(4)}</td>
+            <td style="color: var(--text-muted); font-size: 0.9em;">${item.timestamp || '-'}</td>
+        `;
+        body.appendChild(row);
+    });
+}
+
+async function fetchJson(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Request failed for ${url}`);
+    }
+    return response.json();
+}
+
+function renderClassChart(data) {
+    const ctx = document.getElementById('classChart');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(data),
+            datasets: [{
+                label: 'Prediction Count',
+                data: Object.values(data),
+                backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                borderColor: '#3b82f6',
+                borderWidth: 1
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+}
+
+function renderCalibrationChart(data) {
+    const ctx = document.getElementById('calibrationChart');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(data),
+            datasets: [{
+                label: 'Actual Accuracy %',
+                data: Object.values(data),
+                backgroundColor: 'rgba(16, 185, 129, 0.5)',
+                borderColor: '#10b981',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true, max: 100 } }
+        }
+    });
+}
+
+function renderLatencyChart(data) {
+    const ctx = document.getElementById('latencyChart');
+    if (!ctx || !data.length) return;
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => `#${d.id}`),
+            datasets: [{
+                label: 'Latency (ms)',
+                data: data.map(d => d.latency),
+                borderColor: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                fill: true,
+                tension: 0.2
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+}
+
+function renderFPFNTrends(data) {
+    const err1n = document.getElementById('err1Name');
+    const err1c = document.getElementById('err1Count');
+    const err2n = document.getElementById('err2Name');
+    const err2c = document.getElementById('err2Count');
+    if(err1n) err1n.textContent = data.top1?.name || "None";
+    if(err1c) err1c.textContent = data.top1?.count || 0;
+    if(err2n) err2n.textContent = data.top2?.name || "None";
+    if(err2c) err2c.textContent = data.top2?.count || 0;
+}
+
+function renderFeatureDrift(data) {
+    const container = document.getElementById('featureDriftInfo');
+    if (!container) return;
+    if (!data.sufficient_data) {
+        container.innerHTML = '<span style="color: var(--text-muted);">Not enough data (minimum 20 records required)</span>';
+        return;
+    }
+    
+    let html = '';
+    const keys = Object.keys(data.recent);
+    if(keys.length === 0) {
+        container.innerHTML = '<span style="color: var(--text-muted);">No numerical features found to analyze.</span>';
+        return;
+    }
+    
+    for (let key of keys) {
+        html += `
+        <div style="flex: 1; min-width: 150px; margin: 10px;">
+            <p style="color: var(--text-muted); margin-bottom: 5px; font-weight: 600;">Feature: ${key}</p>
+            <strong style="font-size: 1.2rem;">${data.recent[key]}</strong> <small>(Overall: ${data.overall[key]})</small>
+        </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+async function loadAdvancedMonitoring() {
+    try {
+        const [trend, matrix, drift, outliers, conceptDrift, latency, featureDrift, classDist, calib, fpfn] = await Promise.all([
+            fetchJson('/metrics/accuracy-trend?project_id=1'),
+            fetchJson('/metrics/confusion-matrix?project_id=1'),
+            fetchJson('/metrics/data-drift?project_id=1'),
+            fetchJson('/metrics/outliers?project_id=1'),
+            fetchJson('/metrics/concept-drift?project_id=1'),
+            fetchJson('/metrics/latency-trend?project_id=1'),
+            fetchJson('/metrics/feature-drift?project_id=1'),
+            fetchJson('/metrics/class-distribution?project_id=1'),
+            fetchJson('/metrics/model-calibration?project_id=1'),
+            fetchJson('/metrics/fp-fn-trends?project_id=1')
+        ]);
+
+        renderAccuracyTrendChart(trend);
+        renderConfusionMatrix(matrix);
+        renderDriftStatus(drift);
+        renderOutliers(outliers);
+        renderConceptDrift(conceptDrift);
+        renderLatencyChart(latency);
+        renderFeatureDrift(featureDrift);
+        renderClassChart(classDist);
+        renderCalibrationChart(calib);
+        renderFPFNTrends(fpfn);
+    } catch (err) {
+        console.error(err);
+        const driftMessage = document.getElementById('driftMessage');
+        if (driftMessage) {
+            driftMessage.textContent = 'Failed to load advanced metrics.';
+            driftMessage.style.color = 'var(--danger)';
+        }
+    }
+}
+
+async function initDashboard() {
+    try {
+        const summary = await fetchJson('/metrics/summary?project_id=1');
+        
+        document.getElementById('uiTotal').textContent = summary.total;
+        document.getElementById('uiCorrect').textContent = summary.correct;
+        document.getElementById('uiWrong').textContent = summary.wrong;
+        document.getElementById('uiAccuracy').textContent = summary.accuracy + '%';
+        
+        renderPieChart(summary.correct, summary.wrong);
+    } catch (e) {
+        console.error("Failed to load pie chart", e);
+    }
+    loadAdvancedMonitoring();
+}

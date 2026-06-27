@@ -1,0 +1,8 @@
+def check_retrain_needed(metrics):
+    if metrics["accuracy"] < 70:
+        return "⚠️ Accuracy dropped below 70%. Retraining recommended."
+
+    if metrics["wrong"] > 20:
+        return "⚠️ High number of wrong predictions."
+
+    return "✅ Model performing well."

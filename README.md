@@ -1,2 +1,23 @@
-# ML-Monitoring-System
-Flask-based ML observability service for collecting prediction telemetry, tracking performance/drift metrics, and exporting a deep JSON report.
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Database
+*.db
+
+# Environment variables
+.env
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
